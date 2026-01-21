@@ -2,3 +2,4 @@ streamlit
 qrcode
 Pillow
 openpyxl
+datetime
