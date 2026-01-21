@@ -101,7 +101,7 @@ def read_employee_file():
         return None
 
 # ---------------------------
-# QR Scanner Component (DEFAULT CAMERA)
+# QR Scanner Component (BACK CAMERA)
 # ---------------------------
 def qr_scanner():
     components.html(
@@ -118,23 +118,28 @@ def qr_scanner():
         <script>
             function onScanSuccess(decodedText, decodedResult) {
                 document.getElementById('result').innerText = decodedText;
-
-                // Pass QR value to Streamlit using URL query
-                window.location.search = "?qr=" + encodeURIComponent(decodedText);
+                window.parent.postMessage({ type: 'qr', text: decodedText }, '*');
             }
 
             function onScanFailure(error) {
                 // ignore
             }
 
-            let html5QrcodeScanner = new Html5QrcodeScanner(
-                "reader",
-                {
-                    fps: 10,
-                    qrbox: 250
+            Html5Qrcode.getCameras().then(devices => {
+                if (devices && devices.length) {
+                    let backCamera = devices.find(d => d.label.toLowerCase().includes("back")) || devices[0];
+
+                    const html5Qrcode = new Html5Qrcode("reader");
+                    html5Qrcode.start(
+                        { deviceId: { exact: backCamera.id } },
+                        { fps: 10, qrbox: 250 },
+                        onScanSuccess,
+                        onScanFailure
+                    );
                 }
-            );
-            html5QrcodeScanner.render(onScanSuccess, onScanFailure);
+            }).catch(err => {
+                document.getElementById('result').innerText = "Camera permission required.";
+            });
         </script>
         </body>
         </html>
@@ -150,35 +155,61 @@ def main():
     st.markdown("<h1 style='text-align:center; color:#FFD700;'>QR Attendance Scanner</h1>", unsafe_allow_html=True)
     st.markdown("<p style='text-align:center; color:white;'>Scan QR to mark attendance</p>", unsafe_allow_html=True)
 
-    # Load employee list
-    df_employees = read_employee_file()
-    if df_employees is None:
-        return
-
     qr_scanner()
 
-    # Read QR from URL
-    qr = st.experimental_get_query_params().get("qr", [""])[0]
+    # Listen for QR scan results
+    if "qr_data" not in st.session_state:
+        st.session_state.qr_data = ""
 
-    if qr:
-        qr = qr.strip()
+    # PostMessage listener
+    st.components.v1.html(
+        """
+        <script>
+        window.addEventListener("message", (event) => {
+            if (event.data.type === "qr") {
+                window.parent.postMessage({ type: "qr", text: event.data.text }, "*");
+            }
+        }, false);
+        </script>
+        """,
+        height=0,
+        width=0
+    )
 
-        # Clear query so it doesn't re-scan same QR
-        st.experimental_set_query_params(qr="")
+    # get message from iframe
+    message = st.experimental_get_query_params().get("qr", [""])[0]
 
-        # Format: Name|EmpID OR EmpID only
-        if "|" in qr:
-            emp_id = qr.split("|")[-1].strip()
-        else:
-            emp_id = qr
+    # handle QR from session_state
+    if st.session_state.qr_data == "" and message != "":
+        st.session_state.qr_data = message
 
-        df_att = load_attendance()
-        today = datetime.date.today().strftime("%Y-%m-%d")
+    if st.session_state.qr_data:
+        scanned = st.session_state.qr_data
+        st.session_state.qr_data = ""
 
+        parts = scanned.split("|")
+        if len(parts) != 2:
+            st.error("Invalid QR format. Use: Name | EmpID")
+            return
+
+        name_qr = parts[0].strip()
+        emp_id = parts[1].strip()
+
+        df_employees = read_employee_file()
+        if df_employees is None:
+            return
+
+        # verify
         if emp_id in df_employees["emp"].astype(str).tolist():
             name = df_employees[df_employees["emp"].astype(str) == emp_id]["name"].values[0]
 
-            # prevent double logging for today
+            # show verification
+            st.success(f"VERIFIED: {name} | {emp_id}")
+
+            df_att = load_attendance()
+            today = datetime.date.today().strftime("%Y-%m-%d")
+
+            # prevent duplicate attendance for same day
             if ((df_att["emp_id"].astype(str) == emp_id) & (df_att["date"] == today)).any():
                 st.warning("Attendance already recorded today.")
             else:
@@ -195,7 +226,7 @@ def main():
             st.error("Employee NOT VERIFIED ❌")
 
     st.markdown("---")
-    st.markdown("<h2 style='color:#FFD700;'>Attendance Table (VERIFIED ONLY)</h2>", unsafe_allow_html=True)
+    st.markdown("<h2 style='color:#FFD700;'>Verified Attendance Logs</h2>", unsafe_allow_html=True)
     st.dataframe(load_attendance())
 
 if __name__ == "__main__":
