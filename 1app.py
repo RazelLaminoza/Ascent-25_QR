@@ -118,7 +118,9 @@ def qr_scanner():
         <script>
             function onScanSuccess(decodedText, decodedResult) {
                 document.getElementById('result').innerText = decodedText;
-                window.parent.postMessage({ type: 'qr', text: decodedText }, '*');
+
+                // Pass QR value to Streamlit using URL query
+                window.location.search = "?qr=" + encodeURIComponent(decodedText);
             }
 
             function onScanFailure(error) {
@@ -153,40 +155,22 @@ def main():
     if df_employees is None:
         return
 
-    # Setup session state
-    if "qr_value" not in st.session_state:
-        st.session_state.qr_value = ""
-
     qr_scanner()
 
-    # This script listens to QR messages and saves it to session state
-    st.markdown("""
-        <script>
-        window.addEventListener("message", (event) => {
-            if (event.data.type === "qr") {
-                const qr = event.data.text;
-                window.parent.postMessage({type:"stQr", text: qr}, "*");
-            }
-        });
-        </script>
-    """, unsafe_allow_html=True)
+    # Read QR from URL
+    qr = st.experimental_get_query_params().get("qr", [""])[0]
 
-    # Hidden input to capture QR in Streamlit
-    qr_input = st.text_input("", key="hidden_qr", value="", label_visibility="collapsed")
+    if qr:
+        qr = qr.strip()
 
-    if qr_input:
-        st.session_state.qr_value = qr_input
-        st.experimental_rerun()
+        # Clear query so it doesn't re-scan same QR
+        st.experimental_set_query_params(qr="")
 
-    # Process QR
-    if st.session_state.qr_value:
-        scanned = st.session_state.qr_value.strip()
-
-        # QR format: Name | EmpID OR EmpID only
-        if "|" in scanned:
-            emp_id = scanned.split("|")[-1].strip()
+        # Format: Name|EmpID OR EmpID only
+        if "|" in qr:
+            emp_id = qr.split("|")[-1].strip()
         else:
-            emp_id = scanned
+            emp_id = qr
 
         df_att = load_attendance()
         today = datetime.date.today().strftime("%Y-%m-%d")
@@ -209,8 +193,6 @@ def main():
 
         else:
             st.error("Employee NOT VERIFIED ❌")
-
-        st.session_state.qr_value = ""
 
     st.markdown("---")
     st.markdown("<h2 style='color:#FFD700;'>Attendance Table (VERIFIED ONLY)</h2>", unsafe_allow_html=True)
