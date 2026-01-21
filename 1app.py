@@ -3,7 +3,6 @@ import pandas as pd
 import os
 import base64
 import datetime
-import streamlit.components.v1 as components
 
 # ---------------------------
 # Constants
@@ -94,138 +93,58 @@ def save_attendance(df):
 # Read Employee File
 # ---------------------------
 def read_employee_file():
-    if os.path.exists("clean_employees.xlsx"):
-        return pd.read_excel("clean_employees.xlsx")
+    if os.path.exists(EMPLOYEE_EXCEL):
+        return pd.read_excel(EMPLOYEE_EXCEL)
     else:
         st.error("Employee Excel file not found.")
         return None
 
 # ---------------------------
-# QR Scanner Component (BACK CAMERA)
-# ---------------------------
-def qr_scanner():
-    components.html(
-        """
-        <html>
-        <head>
-          <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
-        </head>
-        <body>
-        <div style="width:100%; text-align:center;">
-            <div id="reader" style="width: 400px; margin: 0 auto;"></div>
-        </div>
-
-        <script>
-            function onScanSuccess(decodedText, decodedResult) {
-                // send scanned QR to Streamlit
-                window.parent.postMessage({ type: 'qr_scanned', text: decodedText }, '*');
-            }
-
-            function onScanFailure(error) {
-                // ignore
-            }
-
-            let html5QrcodeScanner = new Html5QrcodeScanner(
-                "reader",
-                {
-                    fps: 10,
-                    qrbox: 250,
-                    videoConstraints: {
-                        facingMode: { exact: "environment" }
-                    }
-                }
-            );
-
-            html5QrcodeScanner.render(onScanSuccess, onScanFailure);
-        </script>
-        </body>
-        </html>
-        """,
-        height=450,
-        width=600,
-    )
-
-# ---------------------------
 # Main Page
 # ---------------------------
 def main():
-    st.markdown("<h1 style='text-align:center; color:#FFD700;'>QR Attendance Scanner</h1>", unsafe_allow_html=True)
-    st.markdown("<p style='text-align:center; color:white;'>Scan QR to mark attendance</p>", unsafe_allow_html=True)
+    st.markdown("<h1 style='text-align:center; color:#FFD700;'>Attendance Checker</h1>", unsafe_allow_html=True)
+    st.markdown("<p style='text-align:center; color:white;'>Enter Employee ID to verify and log attendance</p>", unsafe_allow_html=True)
 
-    # Initialize session state
-    if "scanned_qr" not in st.session_state:
-        st.session_state.scanned_qr = ""
+    emp_id = st.text_input("Employee ID", key="emp_id_input")
 
-    qr_scanner()
+    if st.button("Verify & Log"):
+        if not emp_id.strip():
+            st.error("Please enter an Employee ID")
+            return
 
-    # ---- JS Message Listener ----
-    st.write(
-        """
-        <script>
-        const streamlitReceive = (event) => {
-            if (event.data && event.data.type === 'qr_scanned') {
-                window.parent.postMessage({ type: 'set_qr', text: event.data.text }, '*');
-            }
-        };
-        window.addEventListener('message', streamlitReceive);
-        </script>
-        """,
-        unsafe_allow_html=True
-    )
+        df_employees = read_employee_file()
+        if df_employees is None:
+            return
 
-    # ---- Receive QR from JS ----
-    qr = st.experimental_get_query_params().get("qr", [""])[0]
-    if qr:
-        st.session_state.scanned_qr = qr
+        if emp_id in df_employees["emp"].astype(str).tolist():
+            name = df_employees[df_employees["emp"].astype(str) == emp_id]["name"].values[0]
+            st.success(f"VERIFIED: {name} | {emp_id}")
 
-    # ---- Hidden QR input ----
-    scanned = st.text_input("Scanned QR:", value=st.session_state.scanned_qr, key="scanned_qr_input")
+            df_att = load_attendance()
+            today = (datetime.datetime.utcnow() + datetime.timedelta(hours=8)).strftime("%Y-%m-%d")
+            now_pht = (datetime.datetime.utcnow() + datetime.timedelta(hours=8)).strftime("%H:%M:%S")
 
-    # Process QR automatically
-    if scanned and scanned != "":
-        process_qr(scanned)
+            # prevent duplicate attendance for same day
+            if ((df_att["emp_id"].astype(str) == emp_id) & (df_att["date"] == today)).any():
+                st.warning("Attendance already recorded today.")
+            else:
+                new_row = pd.DataFrame([{
+                    "name": name,
+                    "emp_id": emp_id,
+                    "date": today,
+                    "time": now_pht
+                }])
+                df_att = pd.concat([df_att, new_row], ignore_index=True)
+                save_attendance(df_att)
+                st.success(f"Attendance recorded for {name} ({emp_id})")
+
+        else:
+            st.error("Employee NOT VERIFIED ❌")
 
     st.markdown("---")
     st.markdown("<h2 style='color:#FFD700;'>Attendance Table</h2>", unsafe_allow_html=True)
     st.dataframe(load_attendance())
-
-
-def process_qr(scanned):
-    parts = scanned.split("|")
-    if len(parts) != 2:
-        st.error("Invalid QR format. Use: Name | EmpID")
-        return
-
-    name_qr = parts[0].strip()
-    emp_id = parts[1].strip()
-
-    df_employees = read_employee_file()
-    if df_employees is None:
-        return
-
-    if emp_id in df_employees["emp"].astype(str).tolist():
-        name = df_employees[df_employees["emp"].astype(str) == emp_id]["name"].values[0]
-        st.success(f"VERIFIED: {name} | {emp_id}")
-
-        df_att = load_attendance()
-        today = (datetime.datetime.utcnow() + datetime.timedelta(hours=8)).strftime("%Y-%m-%d")
-        now_pht = (datetime.datetime.utcnow() + datetime.timedelta(hours=8)).strftime("%H:%M:%S")
-
-        if ((df_att["emp_id"].astype(str) == emp_id) & (df_att["date"] == today)).any():
-            st.warning("Attendance already recorded today.")
-        else:
-            new_row = pd.DataFrame([{
-                "name": name,
-                "emp_id": emp_id,
-                "date": today,
-                "time": now_pht
-            }])
-            df_att = pd.concat([df_att, new_row], ignore_index=True)
-            save_attendance(df_att)
-            st.success(f"Attendance recorded for {name} ({emp_id})")
-    else:
-        st.error("Employee NOT VERIFIED ❌")
-
 
 if __name__ == "__main__":
     main()
