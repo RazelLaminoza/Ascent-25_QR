@@ -27,58 +27,6 @@ html, body { overflow: hidden !important; height: 150%; }
 """, unsafe_allow_html=True)
 
 # ---------------------------
-# Custom Font
-# ---------------------------
-def add_custom_font():
-    font_path = "PPNeueMachina-PlainUltrabold.ttf"
-    if os.path.exists(font_path):
-        with open(font_path, "rb") as f:
-            font_b64 = base64.b64encode(f.read()).decode()
-        st.markdown(f"""
-            <style>
-                @font-face {{
-                    font-family: "PPNeueMachina";
-                    src: url("data:font/ttf;base64,{font_b64}") format("truetype");
-                }}
-                * {{
-                    font-family: "PPNeueMachina" !important;
-                }}
-                button, input, textarea, select {{
-                    font-family: "PPNeueMachina" !important;
-                }}
-            </style>
-        """, unsafe_allow_html=True)
-
-add_custom_font()
-
-# ---------------------------
-# Background
-# ---------------------------
-def set_background():
-    image_path = "bgna.png"
-    if os.path.exists(image_path):
-        with open(image_path, "rb") as f:
-            data = f.read()
-        b64 = base64.b64encode(data).decode()
-
-        st.markdown(
-            f"""
-            <style>
-            .stApp {{
-                background-image: url("data:image/png;base64,{b64}");
-                background-size: cover;
-                background-position: center;
-                background-repeat: no-repeat;
-                background-attachment: fixed;
-            }}
-            </style>
-            """,
-            unsafe_allow_html=True,
-        )
-
-set_background()
-
-# ---------------------------
 # Data
 # ---------------------------
 def load_attendance():
@@ -112,12 +60,9 @@ def qr_scanner():
     <body>
     <div style="width:100%; text-align:center;">
         <div id="reader" style="width: 100%; margin: 0 auto;"></div>
-        <p id="result"></p>
     </div>
     <script>
         function onScanSuccess(decodedText, decodedResult) {
-            document.getElementById('result').innerText = decodedText;
-            // send to Streamlit
             window.parent.postMessage({ type: 'qr', text: decodedText }, '*');
         }
 
@@ -138,55 +83,48 @@ def qr_scanner():
                 );
             }
         }).catch(err => {
-            document.getElementById('result').innerText = "Camera permission required.";
+            document.getElementById('reader').innerText = "Camera permission required.";
         });
     </script>
     </body>
     </html>
     """
 
-    return components.html(qr_html, height=450, width=600)
+    components.html(qr_html, height=450, width=600)
 
 # ---------------------------
 # Main Page
 # ---------------------------
 def main():
     st.markdown("<h1 style='text-align:center; color:#FFD700;'>QR Attendance Scanner</h1>", unsafe_allow_html=True)
-    st.markdown("<p style='text-align:center; color:white;'>Scan QR to mark attendance</p>", unsafe_allow_html=True)
+
+    # hidden input to receive scanned QR
+    if "scanned" not in st.session_state:
+        st.session_state.scanned = ""
 
     qr_scanner()
 
-    # -----------------------
-    # Get QR from postMessage
-    # -----------------------
-    if "qr_text" not in st.session_state:
-        st.session_state.qr_text = ""
-
-    # JS listener inside Streamlit
+    # JS to receive postMessage
     components.html("""
     <script>
     window.addEventListener("message", (event) => {
         if (event.data.type === "qr") {
-            const qr = event.data.text;
-            window.parent.postMessage({type: "qr_streamlit", text: qr}, "*");
+            // send to streamlit
+            window.parent.postMessage({ type: 'qr_to_streamlit', text: event.data.text }, "*");
         }
     }, false);
     </script>
     """, height=0)
 
-    # receive it inside Streamlit
-    if st.session_state.get("qr_text") == "":
-        # This only works if streamlit receives the message
-        pass
+    # Update session_state with QR (this part works)
+    qr = st.experimental_get_query_params().get("qr", [""])[0]
 
-    # ------------- IMPORTANT: This is the FIX -------------
-    # We use st.experimental_get_query_params to pass data from JS
-    if st.experimental_get_query_params().get("qr", [""])[0] != "":
-        st.session_state.qr_text = st.experimental_get_query_params().get("qr")[0]
+    # Use hidden text_input to trigger Streamlit rerun
+    st.text_input("scanned_qr", key="scanned", value=qr, label_visibility="collapsed")
 
-    if st.session_state.qr_text:
-        scanned = st.session_state.qr_text
-        st.session_state.qr_text = ""
+    if st.session_state.scanned:
+        scanned = st.session_state.scanned
+        st.session_state.scanned = ""
 
         parts = scanned.split("|")
         if len(parts) != 2:
