@@ -120,9 +120,7 @@ def qr_scanner():
                 window.location.href = window.location.origin + window.location.pathname + "?qr=" + encodeURIComponent(decodedText);
             }
 
-            function onScanFailure(error) {
-                // ignore
-            }
+            function onScanFailure(error) {}
 
             let html5QrcodeScanner = new Html5QrcodeScanner(
                 "reader",
@@ -144,7 +142,7 @@ def qr_scanner():
     )
 
 # ---------------------------
-# Main Page
+# MAIN (ONE PAGE)
 # ---------------------------
 def main():
     st.markdown("<h1 style='text-align:center; color:#FFD700;'>QR Attendance Scanner</h1>", unsafe_allow_html=True)
@@ -152,7 +150,7 @@ def main():
 
     qr_scanner()
 
-    # Get QR from query params
+    # QR from query
     qr_value = st.experimental_get_query_params().get("qr", [""])[0]
 
     if qr_value:
@@ -162,25 +160,24 @@ def main():
         if df_employees is None:
             return
 
+        # Verify
         if emp_id in df_employees["emp"].astype(str).tolist():
             name = df_employees[df_employees["emp"].astype(str) == emp_id]["name"].values[0]
             st.success(f"VERIFIED: {name} | {emp_id}")
 
             df_att = load_attendance()
-            today = (datetime.datetime.utcnow() + datetime.timedelta(hours=8)).strftime("%Y-%m-%d")
-            now_pht = (datetime.datetime.utcnow() + datetime.timedelta(hours=8)).strftime("%H:%M:%S")
+            today = datetime.datetime.now().strftime("%Y-%m-%d")
+            now_time = datetime.datetime.now().strftime("%H:%M:%S")
 
-            # Prevent duplicate for today
             if ((df_att["emp_id"].astype(str) == emp_id) & (df_att["date"] == today)).any():
                 st.warning("Attendance already recorded today.")
             else:
-                new_row = pd.DataFrame([{
+                df_att = pd.concat([df_att, pd.DataFrame([{
                     "name": name,
                     "emp_id": emp_id,
                     "date": today,
-                    "time": now_pht
-                }])
-                df_att = pd.concat([df_att, new_row], ignore_index=True)
+                    "time": now_time
+                }])], ignore_index=True)
                 save_attendance(df_att)
                 st.success(f"Attendance recorded for {name} ({emp_id})")
 
