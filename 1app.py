@@ -85,10 +85,20 @@ def load_attendance():
     if os.path.exists(ATTENDANCE_FILE):
         return pd.read_csv(ATTENDANCE_FILE)
     else:
-        return pd.DataFrame(columns=["name", "emp_id", "time"])
+        return pd.DataFrame(columns=["name", "emp_id", "date", "time"])
 
 def save_attendance(df):
     df.to_csv(ATTENDANCE_FILE, index=False)
+
+# ---------------------------
+# Read Employee File
+# ---------------------------
+def read_employee_file():
+    if os.path.exists("clean_employees.xlsx"):
+        return pd.read_excel("clean_employees.xlsx")
+    else:
+        st.error("Employee Excel file not found.")
+        return None
 
 # ---------------------------
 # QR Scanner Component (BACK CAMERA)
@@ -121,7 +131,7 @@ def qr_scanner():
                     fps: 10,
                     qrbox: 250,
                     videoConstraints: {
-                        facingMode: { exact: "environment" }  // 🔥 BACK CAMERA
+                        facingMode: { exact: "environment" }
                     }
                 }
             );
@@ -141,54 +151,47 @@ def main():
     st.markdown("<h1 style='text-align:center; color:#FFD700;'>QR Attendance Scanner</h1>", unsafe_allow_html=True)
     st.markdown("<p style='text-align:center; color:white;'>Scan QR to mark attendance</p>", unsafe_allow_html=True)
 
-    mode = st.radio("Mode:", ["Manual", "Auto"])
-
     qr_scanner()
 
     scanned = st.text_input("Scanned QR (Auto):", key="scanned_qr")
 
     if scanned:
-        emp_id = scanned.split("|")[-1].strip()
-
-        if not os.path.exists(EMPLOYEE_EXCEL):
-            st.error("Employee Excel file not found.")
+        # Expected QR format: Name | EmpID
+        parts = scanned.split("|")
+        if len(parts) != 2:
+            st.error("Invalid QR format. Use: Name | EmpID")
             return
 
-        df_employees = pd.read_excel(EMPLOYEE_EXCEL)
+        name_qr = parts[0].strip()
+        emp_id = parts[1].strip()
 
+        df_employees = read_employee_file()
+        if df_employees is None:
+            return
+
+        # verify
         if emp_id in df_employees["emp"].astype(str).tolist():
             name = df_employees[df_employees["emp"].astype(str) == emp_id]["name"].values[0]
 
+            # show verification
             st.success(f"VERIFIED: {name} | {emp_id}")
 
             df_att = load_attendance()
 
-            # Auto mode => save automatically
-            if mode == "Auto":
-                if emp_id in df_att["emp_id"].astype(str).tolist():
-                    st.warning("Attendance already recorded.")
-                else:
-                    df_att = df_att.append({
-                        "name": name,
-                        "emp_id": emp_id,
-                        "time": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                    }, ignore_index=True)
-                    save_attendance(df_att)
-                    st.success(f"Attendance recorded for {name} ({emp_id})")
+            today = datetime.date.today().strftime("%Y-%m-%d")
 
-            # Manual mode => show LOG button
+            # prevent duplicate attendance for same day
+            if ((df_att["emp_id"].astype(str) == emp_id) & (df_att["date"] == today)).any():
+                st.warning("Attendance already recorded today.")
             else:
-                if st.button("LOG ATTENDANCE"):
-                    if emp_id in df_att["emp_id"].astype(str).tolist():
-                        st.warning("Attendance already recorded.")
-                    else:
-                        df_att = df_att.append({
-                            "name": name,
-                            "emp_id": emp_id,
-                            "time": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                        }, ignore_index=True)
-                        save_attendance(df_att)
-                        st.success(f"Attendance recorded for {name} ({emp_id})")
+                df_att = df_att.append({
+                    "name": name,
+                    "emp_id": emp_id,
+                    "date": today,
+                    "time": datetime.datetime.now().strftime("%H:%M:%S")
+                }, ignore_index=True)
+                save_attendance(df_att)
+                st.success(f"Attendance recorded for {name} ({emp_id})")
 
         else:
             st.error("Employee NOT VERIFIED ❌")
