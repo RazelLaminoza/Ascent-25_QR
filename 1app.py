@@ -5,11 +5,29 @@ import base64
 import datetime
 import streamlit.components.v1 as components
 
+# ---------------------------
+# Constants
+# ---------------------------
 EMPLOYEE_EXCEL = "clean_employees.xlsx"
 ATTENDANCE_FILE = "attendance.csv"
 
 # ---------------------------
-# Font + Background
+# Styles (Same as your main app)
+# ---------------------------
+st.markdown("""
+<style>
+[data-testid="stToolbar"] { display: none !important; }
+[data-testid="stDeployButton"] { display: none !important; }
+#MainMenu { visibility: hidden; }
+footer { visibility: hidden; }
+header { visibility: hidden; }
+html, body { overflow: hidden !important; height: 150%; }
+.block-container { padding: 0 !important; }
+</style>
+""", unsafe_allow_html=True)
+
+# ---------------------------
+# Custom Font
 # ---------------------------
 def add_custom_font():
     font_path = "PPNeueMachina-PlainUltrabold.ttf"
@@ -25,15 +43,26 @@ def add_custom_font():
                 * {{
                     font-family: "PPNeueMachina" !important;
                 }}
+                button, input, textarea, select {{
+                    font-family: "PPNeueMachina" !important;
+                }}
             </style>
         """, unsafe_allow_html=True)
 
+add_custom_font()
+
+# ---------------------------
+# Background
+# ---------------------------
 def set_background():
     image_path = "bgna.png"
     if os.path.exists(image_path):
         with open(image_path, "rb") as f:
-            b64 = base64.b64encode(f.read()).decode()
-        st.markdown(f"""
+            data = f.read()
+        b64 = base64.b64encode(data).decode()
+
+        st.markdown(
+            f"""
             <style>
             .stApp {{
                 background-image: url("data:image/png;base64,{b64}");
@@ -43,132 +72,148 @@ def set_background():
                 background-attachment: fixed;
             }}
             </style>
-        """, unsafe_allow_html=True)
+            """,
+            unsafe_allow_html=True,
+        )
 
-add_custom_font()
 set_background()
 
 # ---------------------------
-# Data functions
+# Data
 # ---------------------------
-def load_employees():
-    if not os.path.exists(EMPLOYEE_EXCEL):
-        st.error("clean_employees.xlsx not found!")
-        return None
-    df = pd.read_excel(EMPLOYEE_EXCEL)
-    df["emp"] = df["emp"].astype(str)
-    return df
-
 def load_attendance():
     if os.path.exists(ATTENDANCE_FILE):
         return pd.read_csv(ATTENDANCE_FILE)
-    return pd.DataFrame(columns=["name", "emp_id", "timestamp"])
+    else:
+        return pd.DataFrame(columns=["name", "emp_id", "date", "time"])
 
 def save_attendance(df):
     df.to_csv(ATTENDANCE_FILE, index=False)
 
 # ---------------------------
-# QR Scanner HTML (REAL TIME)
+# Read Employee File
+# ---------------------------
+def read_employee_file():
+    if os.path.exists(EMPLOYEE_EXCEL):
+        return pd.read_excel(EMPLOYEE_EXCEL)
+    else:
+        st.error("Employee Excel file not found.")
+        return None
+
+# ---------------------------
+# QR Scanner Component (DEFAULT CAMERA)
 # ---------------------------
 def qr_scanner():
-    html_code = """
-    <html>
-    <head>
-      <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
-    </head>
-    <body>
-      <div id="reader" style="width: 100%;"></div>
+    components.html(
+        """
+        <html>
+        <head>
+          <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
+        </head>
+        <body>
+        <div style="width:100%; text-align:center;">
+            <div id="reader" style="width: 100%; margin: 0 auto;"></div>
+            <p id="result"></p>
+        </div>
+        <script>
+            function onScanSuccess(decodedText, decodedResult) {
+                document.getElementById('result').innerText = decodedText;
+                window.parent.postMessage({ type: 'qr', text: decodedText }, '*');
+            }
 
-      <script>
-        function onScanSuccess(decodedText, decodedResult) {
-            window.parent.postMessage({ type: "qr", text: decodedText }, "*");
-        }
+            function onScanFailure(error) {
+                // ignore
+            }
 
-        function onScanFailure(error) {}
-
-        Html5Qrcode.getCameras().then(devices => {
-          if (devices && devices.length) {
-            const cameraId = devices[devices.length - 1].id;
-            const html5Qrcode = new Html5Qrcode("reader");
-            html5Qrcode.start(
-              cameraId,
-              { fps: 10, qrbox: 250 },
-              onScanSuccess,
-              onScanFailure
+            let html5QrcodeScanner = new Html5QrcodeScanner(
+                "reader",
+                {
+                    fps: 10,
+                    qrbox: 250
+                }
             );
-          }
-        }).catch(err => {
-          document.body.innerHTML = "<h3 style='color:red; text-align:center;'>Camera permission denied</h3>";
-        });
-      </script>
-    </body>
-    </html>
-    """
-    components.html(html_code, height=450)
+            html5QrcodeScanner.render(onScanSuccess, onScanFailure);
+        </script>
+        </body>
+        </html>
+        """,
+        height=450,
+        width=600,
+    )
 
 # ---------------------------
-# Main App
+# Main Page
 # ---------------------------
 def main():
-    st.title("📌 Attendance Scanner")
+    st.markdown("<h1 style='text-align:center; color:#FFD700;'>QR Attendance Scanner</h1>", unsafe_allow_html=True)
+    st.markdown("<p style='text-align:center; color:white;'>Scan QR to mark attendance</p>", unsafe_allow_html=True)
 
-    df_emp = load_employees()
-    if df_emp is None:
+    # Load employee list
+    df_employees = read_employee_file()
+    if df_employees is None:
         return
 
-    if "qr_text" not in st.session_state:
-        st.session_state.qr_text = ""
+    # Setup session state
+    if "qr_value" not in st.session_state:
+        st.session_state.qr_value = ""
 
-    st.subheader("Scan QR (Back Camera)")
     qr_scanner()
 
-    # Listen to postMessage and save to session_state
-    st.write("""
+    # This script listens to QR messages and saves it to session state
+    st.markdown("""
         <script>
         window.addEventListener("message", (event) => {
             if (event.data.type === "qr") {
                 const qr = event.data.text;
-                document.getElementById("qr_input").value = qr;
-                document.getElementById("qr_form").dispatchEvent(new Event("submit"));
+                window.parent.postMessage({type:"stQr", text: qr}, "*");
             }
         });
         </script>
     """, unsafe_allow_html=True)
 
-    # Hidden form to capture QR in Streamlit
-    with st.form("qr_form", clear_on_submit=True):
-        qr_input = st.text_input("QR", key="qr_input")
-        st.form_submit_button("submit", key="qr_submit")
+    # Hidden input to capture QR in Streamlit
+    qr_input = st.text_input("", key="hidden_qr", value="", label_visibility="collapsed")
 
     if qr_input:
-        st.session_state.qr_text = qr_input
+        st.session_state.qr_value = qr_input
+        st.experimental_rerun()
 
     # Process QR
-    if st.session_state.qr_text:
-        emp_id = st.session_state.qr_text.strip()
-        emp_row = df_emp[df_emp["emp"] == emp_id]
+    if st.session_state.qr_value:
+        scanned = st.session_state.qr_value.strip()
 
-        if emp_row.empty:
-            st.error("NOT VERIFIED ❌")
+        # QR format: Name | EmpID OR EmpID only
+        if "|" in scanned:
+            emp_id = scanned.split("|")[-1].strip()
         else:
-            name = emp_row["name"].values[0]
-            df_att = load_attendance()
+            emp_id = scanned
 
-            if emp_id in df_att["emp_id"].astype(str).tolist():
-                st.warning("Already logged today")
+        df_att = load_attendance()
+        today = datetime.date.today().strftime("%Y-%m-%d")
+
+        if emp_id in df_employees["emp"].astype(str).tolist():
+            name = df_employees[df_employees["emp"].astype(str) == emp_id]["name"].values[0]
+
+            # prevent double logging for today
+            if ((df_att["emp_id"].astype(str) == emp_id) & (df_att["date"] == today)).any():
+                st.warning("Attendance already recorded today.")
             else:
                 df_att = df_att.append({
                     "name": name,
                     "emp_id": emp_id,
-                    "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    "date": today,
+                    "time": datetime.datetime.now().strftime("%H:%M:%S")
                 }, ignore_index=True)
                 save_attendance(df_att)
-                st.success(f"Attendance logged for {name}")
+                st.success(f"Attendance recorded for {name} ({emp_id})")
 
-        st.session_state.qr_text = ""
+        else:
+            st.error("Employee NOT VERIFIED ❌")
 
-    # Verified table
-    st.subheader("Verified Logs")
+        st.session_state.qr_value = ""
+
+    st.markdown("---")
+    st.markdown("<h2 style='color:#FFD700;'>Attendance Table (VERIFIED ONLY)</h2>", unsafe_allow_html=True)
     st.dataframe(load_attendance())
 
 if __name__ == "__main__":
