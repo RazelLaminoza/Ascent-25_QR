@@ -3,7 +3,7 @@ import pandas as pd
 import os
 import base64
 import datetime
-import streamlit.components.v1 as components   # ✅ CORRECT IMPORT
+import streamlit.components.v1 as components   # ✅ Correct import
 
 # ---------------------------
 # Constants
@@ -92,7 +92,7 @@ def save_attendance(df):
     df.to_csv(ATTENDANCE_FILE, index=False)
 
 # ---------------------------
-# QR Scanner Component
+# QR Scanner Component (BACK CAMERA)
 # ---------------------------
 def qr_scanner():
     components.html(
@@ -117,7 +117,15 @@ def qr_scanner():
             }
 
             let html5QrcodeScanner = new Html5QrcodeScanner(
-                "reader", { fps: 10, qrbox: 250 });
+                "reader",
+                {
+                    fps: 10,
+                    qrbox: 250,
+                    videoConstraints: {
+                        facingMode: { exact: "environment" }  // 🔥 BACK CAMERA
+                    }
+                }
+            );
             html5QrcodeScanner.render(onScanSuccess, onScanFailure);
         </script>
         </body>
