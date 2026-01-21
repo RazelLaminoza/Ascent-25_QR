@@ -1,11 +1,7 @@
 import streamlit as st
 import pandas as pd
 import os
-import io
 import base64
-import time
-from PIL import Image, ImageDraw, ImageFont
-import qrcode
 import datetime
 import streamlit.components.v1 as components
 
@@ -83,7 +79,7 @@ def save_attendance(df):
     df.to_csv(ATTENDANCE_FILE, index=False)
 
 # ---------------------------
-# QR Scanner HTML (with camera permission prompt)
+# QR Scanner HTML (with camera prompt)
 # ---------------------------
 def qr_scanner_html():
     return """
@@ -97,7 +93,8 @@ def qr_scanner_html():
 
       <script>
         function onScanSuccess(decodedText, decodedResult) {
-          window.parent.postMessage({ type: 'qr', text: decodedText }, '*');
+          // Send QR to Streamlit via URL param
+          window.parent.location.href = window.parent.location.pathname + "?qr=" + encodeURIComponent(decodedText);
         }
 
         function onScanFailure(error) {
@@ -142,7 +139,6 @@ def verify_and_log(qr_text, df_emp):
         name = ""
 
     emp_row = df_emp[df_emp["emp"] == emp_id]
-
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     if emp_row.empty:
@@ -150,7 +146,6 @@ def verify_and_log(qr_text, df_emp):
 
     verified_name = emp_row["name"].values[0]
 
-    # prevent double entry
     df_att = load_attendance()
     if emp_id in df_att["emp_id"].astype(str).tolist():
         return True, "ALREADY LOGGED", emp_id, timestamp, verified_name
@@ -169,37 +164,26 @@ def main():
 
     # --- QR SCANNER ---
     st.subheader("📷 Scan QR (Back Camera)")
-    scanner_col, status_col = st.columns([2, 1])
+    components.html(qr_scanner_html(), height=450, width=700)
 
-    with scanner_col:
-        components.html(qr_scanner_html(), height=450, width=700)
-
-    # --- manual input
+    # --- MANUAL VERIFICATION
     st.subheader("📝 Manual Verification")
     with st.form("manual_form"):
-        manual_emp = st.text_input("Enter Employee ID", key="manual_emp")
+        manual_emp = st.text_input("Enter Employee ID")
         manual_submit = st.form_submit_button("Verify")
 
     if manual_submit:
         st.session_state.qr_text = manual_emp
 
-    # --- listen to QR scan from JS
-    if "qr_text" not in st.session_state:
-        st.session_state.qr_text = ""
+    # --- GET QR FROM URL PARAM ---
+    qr_param = st.experimental_get_query_params().get("qr", [""])[0]
 
-    if st.session_state.get("last_qr", "") != "":
-        st.session_state.qr_text = st.session_state.last_qr
-        st.session_state.last_qr = ""
-
-    # JS message handler
-    message = st.experimental_get_query_params().get("qr", [""])[0]
-    if message:
-        st.session_state.qr_text = message
+    if qr_param:
+        st.session_state.qr_text = qr_param
 
     # --- PROCESS QR
-    if st.session_state.qr_text:
+    if st.session_state.get("qr_text", "") != "":
         ok, status, emp_id, timestamp, name = verify_and_log(st.session_state.qr_text, df_emp)
-
         df_att = load_attendance()
 
         if status == "VERIFIED":
@@ -210,15 +194,15 @@ def main():
                 "timestamp": timestamp
             }])], ignore_index=True)
             save_attendance(df_att)
-
-        if status == "VERIFIED":
             st.success(f"{status} ✔️ | {name} | {emp_id} | {timestamp}")
+
         else:
             st.error(f"{status} ❌ | {name} | {emp_id} | {timestamp}")
 
-        st.session_state.qr_text = ""  # reset
+        st.session_state.qr_text = ""
+        st.experimental_set_query_params(qr="")  # clear param
 
-    # --- ATTENDANCE TABLE (ONLY VERIFIED)
+    # --- VERIFIED TABLE ONLY ---
     st.subheader("🧾 Verified Attendance Log")
     df_att = load_attendance()
     df_verified = df_att[df_att["status"] == "VERIFIED"]
