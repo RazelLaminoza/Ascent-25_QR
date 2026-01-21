@@ -9,7 +9,7 @@ EMPLOYEE_EXCEL = "clean_employees.xlsx"
 ATTENDANCE_FILE = "attendance.csv"
 
 # ---------------------------
-# FONT + BACKGROUND
+# Font + Background
 # ---------------------------
 def add_custom_font():
     font_path = "PPNeueMachina-PlainUltrabold.ttf"
@@ -49,7 +49,7 @@ add_custom_font()
 set_background()
 
 # ---------------------------
-# DATA
+# Data functions
 # ---------------------------
 def load_employees():
     if not os.path.exists(EMPLOYEE_EXCEL):
@@ -68,7 +68,7 @@ def save_attendance(df):
     df.to_csv(ATTENDANCE_FILE, index=False)
 
 # ---------------------------
-# QR SCANNER HTML (postMessage)
+# QR Scanner HTML (REAL TIME)
 # ---------------------------
 def qr_scanner():
     html_code = """
@@ -88,7 +88,7 @@ def qr_scanner():
 
         Html5Qrcode.getCameras().then(devices => {
           if (devices && devices.length) {
-            const cameraId = devices[devices.length - 1].id; // BACK camera
+            const cameraId = devices[devices.length - 1].id;
             const html5Qrcode = new Html5Qrcode("reader");
             html5Qrcode.start(
               cameraId,
@@ -107,43 +107,45 @@ def qr_scanner():
     components.html(html_code, height=450)
 
 # ---------------------------
-# MAIN
+# Main App
 # ---------------------------
 def main():
-    st.title("QR Attendance Scanner")
+    st.title("📌 Attendance Scanner")
 
     df_emp = load_employees()
     if df_emp is None:
         return
 
-    st.subheader("Scan QR")
+    if "qr_text" not in st.session_state:
+        st.session_state.qr_text = ""
+
+    st.subheader("Scan QR (Back Camera)")
     qr_scanner()
 
-    # Listen for QR message
-    qr_value = st.experimental_get_query_params().get("qr", [""])[0]
-
-    # Update session state with QR message
-    if "qr_data" not in st.session_state:
-        st.session_state.qr_data = ""
-
-    # JS -> Streamlit message receiver
+    # Listen to postMessage and save to session_state
     st.write("""
         <script>
         window.addEventListener("message", (event) => {
             if (event.data.type === "qr") {
                 const qr = event.data.text;
-                window.parent.postMessage({qr: qr}, "*");
+                document.getElementById("qr_input").value = qr;
+                document.getElementById("qr_form").dispatchEvent(new Event("submit"));
             }
         });
         </script>
     """, unsafe_allow_html=True)
 
-    # If QR is received via message
-    if st.session_state.qr_data == "":
-        st.session_state.qr_data = qr_value
+    # Hidden form to capture QR in Streamlit
+    with st.form("qr_form", clear_on_submit=True):
+        qr_input = st.text_input("QR", key="qr_input")
+        st.form_submit_button("submit", key="qr_submit")
 
-    if st.session_state.qr_data:
-        emp_id = st.session_state.qr_data.strip()
+    if qr_input:
+        st.session_state.qr_text = qr_input
+
+    # Process QR
+    if st.session_state.qr_text:
+        emp_id = st.session_state.qr_text.strip()
         emp_row = df_emp[df_emp["emp"] == emp_id]
 
         if emp_row.empty:
@@ -163,8 +165,9 @@ def main():
                 save_attendance(df_att)
                 st.success(f"Attendance logged for {name}")
 
-        st.session_state.qr_data = ""
+        st.session_state.qr_text = ""
 
+    # Verified table
     st.subheader("Verified Logs")
     st.dataframe(load_attendance())
 
