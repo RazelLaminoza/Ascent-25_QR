@@ -113,11 +113,12 @@ def qr_scanner():
         <body>
         <div style="width:100%; text-align:center;">
             <div id="reader" style="width: 400px; margin: 0 auto;"></div>
-            <p id="result"></p>
         </div>
+
         <script>
             function onScanSuccess(decodedText, decodedResult) {
-                window.location.href = window.location.pathname + "?qr=" + encodeURIComponent(decodedText);
+                // send scanned QR to Streamlit
+                window.parent.postMessage({ type: 'qr_scanned', text: decodedText }, '*');
             }
 
             function onScanFailure(error) {
@@ -134,6 +135,7 @@ def qr_scanner():
                     }
                 }
             );
+
             html5QrcodeScanner.render(onScanSuccess, onScanFailure);
         </script>
         </body>
@@ -150,24 +152,43 @@ def main():
     st.markdown("<h1 style='text-align:center; color:#FFD700;'>QR Attendance Scanner</h1>", unsafe_allow_html=True)
     st.markdown("<p style='text-align:center; color:white;'>Scan QR to mark attendance</p>", unsafe_allow_html=True)
 
+    # Initialize session state
+    if "scanned_qr" not in st.session_state:
+        st.session_state.scanned_qr = ""
+
     qr_scanner()
 
-    qr_param = st.experimental_get_query_params().get("qr", [""])[0]
-    scanned = st.text_input("Scanned QR (Auto):", value=qr_param, key="scanned_qr")
+    # ---- JS Message Listener ----
+    st.write(
+        """
+        <script>
+        const streamlitReceive = (event) => {
+            if (event.data && event.data.type === 'qr_scanned') {
+                window.parent.postMessage({ type: 'set_qr', text: event.data.text }, '*');
+            }
+        };
+        window.addEventListener('message', streamlitReceive);
+        </script>
+        """,
+        unsafe_allow_html=True
+    )
 
-    st.markdown("---")
-    st.markdown("<h3 style='color:white;'>Manual Entry</h3>", unsafe_allow_html=True)
-    manual_qr = st.text_input("Type QR text (Name | EmpID)", key="manual_qr")
+    # ---- Receive QR from JS ----
+    qr = st.experimental_get_query_params().get("qr", [""])[0]
+    if qr:
+        st.session_state.scanned_qr = qr
 
-    if st.button("Verify & Log (Manual)"):
-        process_qr(manual_qr)
+    # ---- Hidden QR input ----
+    scanned = st.text_input("Scanned QR:", value=st.session_state.scanned_qr, key="scanned_qr_input")
 
-    if scanned:
+    # Process QR automatically
+    if scanned and scanned != "":
         process_qr(scanned)
 
     st.markdown("---")
     st.markdown("<h2 style='color:#FFD700;'>Attendance Table</h2>", unsafe_allow_html=True)
     st.dataframe(load_attendance())
+
 
 def process_qr(scanned):
     parts = scanned.split("|")
@@ -204,6 +225,7 @@ def process_qr(scanned):
             st.success(f"Attendance recorded for {name} ({emp_id})")
     else:
         st.error("Employee NOT VERIFIED ❌")
+
 
 if __name__ == "__main__":
     main()
