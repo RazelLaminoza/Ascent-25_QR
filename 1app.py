@@ -2,10 +2,8 @@ import streamlit as st
 import pandas as pd
 import os
 import base64
-import time
 import datetime
-from PIL import Image, ImageDraw, ImageFont
-from streamlit.components.v1 import components
+import streamlit.components.v1 as components   # ✅ CORRECT IMPORT
 
 # ---------------------------
 # Constants
@@ -134,17 +132,12 @@ def qr_scanner():
 # ---------------------------
 def main():
     st.markdown("<h1 style='text-align:center; color:#FFD700;'>QR Attendance Scanner</h1>", unsafe_allow_html=True)
-
     st.markdown("<p style='text-align:center; color:white;'>Scan QR to mark attendance</p>", unsafe_allow_html=True)
 
-    # QR Scanner
     qr_scanner()
 
-    # Receive QR result
-    qr_text = st.experimental_get_query_params().get("qr", [""])[0]
     scanned = st.text_input("Scanned QR (Auto):", key="scanned_qr")
 
-    # Verify and record attendance
     if scanned:
         emp_id = scanned.split("|")[-1].strip()
 
@@ -158,7 +151,6 @@ def main():
             name = df_employees[df_employees["emp"].astype(str) == emp_id]["name"].values[0]
             df_att = load_attendance()
 
-            # Avoid duplicate attendance
             if emp_id in df_att["emp_id"].astype(str).tolist():
                 st.warning("Attendance already recorded.")
             else:
@@ -178,4 +170,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
