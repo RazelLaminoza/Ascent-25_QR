@@ -3,7 +3,7 @@ import pandas as pd
 import os
 import base64
 import datetime
-import streamlit.components.v1 as components   # ✅ Correct import
+import streamlit.components.v1 as components
 
 # ---------------------------
 # Constants
@@ -16,7 +16,6 @@ ATTENDANCE_FILE = "attendance.csv"
 # ---------------------------
 st.markdown("""
 <style>
-/* FULL KIOSK LOCKDOWN */
 [data-testid="stToolbar"] { display: none !important; }
 [data-testid="stDeployButton"] { display: none !important; }
 #MainMenu { visibility: hidden; }
@@ -142,6 +141,8 @@ def main():
     st.markdown("<h1 style='text-align:center; color:#FFD700;'>QR Attendance Scanner</h1>", unsafe_allow_html=True)
     st.markdown("<p style='text-align:center; color:white;'>Scan QR to mark attendance</p>", unsafe_allow_html=True)
 
+    mode = st.radio("Mode:", ["Manual", "Auto"])
+
     qr_scanner()
 
     scanned = st.text_input("Scanned QR (Auto):", key="scanned_qr")
@@ -157,18 +158,38 @@ def main():
 
         if emp_id in df_employees["emp"].astype(str).tolist():
             name = df_employees[df_employees["emp"].astype(str) == emp_id]["name"].values[0]
+
+            st.success(f"VERIFIED: {name} | {emp_id}")
+
             df_att = load_attendance()
 
-            if emp_id in df_att["emp_id"].astype(str).tolist():
-                st.warning("Attendance already recorded.")
+            # Auto mode => save automatically
+            if mode == "Auto":
+                if emp_id in df_att["emp_id"].astype(str).tolist():
+                    st.warning("Attendance already recorded.")
+                else:
+                    df_att = df_att.append({
+                        "name": name,
+                        "emp_id": emp_id,
+                        "time": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    }, ignore_index=True)
+                    save_attendance(df_att)
+                    st.success(f"Attendance recorded for {name} ({emp_id})")
+
+            # Manual mode => show LOG button
             else:
-                df_att = df_att.append({
-                    "name": name,
-                    "emp_id": emp_id,
-                    "time": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                }, ignore_index=True)
-                save_attendance(df_att)
-                st.success(f"Attendance recorded for {name} ({emp_id})")
+                if st.button("LOG ATTENDANCE"):
+                    if emp_id in df_att["emp_id"].astype(str).tolist():
+                        st.warning("Attendance already recorded.")
+                    else:
+                        df_att = df_att.append({
+                            "name": name,
+                            "emp_id": emp_id,
+                            "time": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        }, ignore_index=True)
+                        save_attendance(df_att)
+                        st.success(f"Attendance recorded for {name} ({emp_id})")
+
         else:
             st.error("Employee NOT VERIFIED ❌")
 
