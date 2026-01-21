@@ -5,13 +5,11 @@ import base64
 import datetime
 import streamlit.components.v1 as components
 
-# ---------------------------
-# CONFIG
-# ---------------------------
-st.set_page_config(page_title="Attendance Scanner", layout="wide")
+EMPLOYEE_EXCEL = "clean_employees.xlsx"
+ATTENDANCE_FILE = "attendance.csv"
 
 # ---------------------------
-# STYLE + FONT + BACKGROUND
+# FONT + BACKGROUND
 # ---------------------------
 def add_custom_font():
     font_path = "PPNeueMachina-PlainUltrabold.ttf"
@@ -51,13 +49,7 @@ add_custom_font()
 set_background()
 
 # ---------------------------
-# DATA FILES
-# ---------------------------
-EMPLOYEE_EXCEL = "clean_employees.xlsx"
-ATTENDANCE_FILE = "attendance.csv"
-
-# ---------------------------
-# LOAD EMPLOYEES
+# DATA
 # ---------------------------
 def load_employees():
     if not os.path.exists(EMPLOYEE_EXCEL):
@@ -67,146 +59,114 @@ def load_employees():
     df["emp"] = df["emp"].astype(str)
     return df
 
-# ---------------------------
-# ATTENDANCE LOG
-# ---------------------------
 def load_attendance():
     if os.path.exists(ATTENDANCE_FILE):
         return pd.read_csv(ATTENDANCE_FILE)
-    return pd.DataFrame(columns=["name", "emp_id", "status", "timestamp"])
+    return pd.DataFrame(columns=["name", "emp_id", "timestamp"])
 
 def save_attendance(df):
     df.to_csv(ATTENDANCE_FILE, index=False)
 
 # ---------------------------
-# QR Scanner HTML (with camera prompt)
+# QR SCANNER HTML (postMessage)
 # ---------------------------
-def qr_scanner_html():
-    return """
+def qr_scanner():
+    html_code = """
     <html>
     <head>
       <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
     </head>
     <body>
-      <h3 style="text-align:center; color:white;">📷 Allow camera access to scan QR</h3>
       <div id="reader" style="width: 100%;"></div>
 
       <script>
         function onScanSuccess(decodedText, decodedResult) {
-          // Send QR to Streamlit via URL param
-          window.parent.location.href = window.parent.location.pathname + "?qr=" + encodeURIComponent(decodedText);
+            window.parent.postMessage({ type: "qr", text: decodedText }, "*");
         }
 
-        function onScanFailure(error) {
-          // ignore
-        }
+        function onScanFailure(error) {}
 
-        function startScanner() {
-          Html5Qrcode.getCameras().then(devices => {
-            if (devices && devices.length) {
-              const cameraId = devices[devices.length - 1].id; // BACK CAMERA
-              let html5QrcodeScanner = new Html5Qrcode("reader");
-              html5QrcodeScanner.start(
-                cameraId,
-                { fps: 10, qrbox: 250 },
-                onScanSuccess,
-                onScanFailure
-              );
-            }
-          }).catch(err => {
-            document.body.innerHTML = "<h3 style='color:red; text-align:center;'>Camera permission denied or not available.</h3>";
-          });
-        }
-
-        startScanner();
+        Html5Qrcode.getCameras().then(devices => {
+          if (devices && devices.length) {
+            const cameraId = devices[devices.length - 1].id; // BACK camera
+            const html5Qrcode = new Html5Qrcode("reader");
+            html5Qrcode.start(
+              cameraId,
+              { fps: 10, qrbox: 250 },
+              onScanSuccess,
+              onScanFailure
+            );
+          }
+        }).catch(err => {
+          document.body.innerHTML = "<h3 style='color:red; text-align:center;'>Camera permission denied</h3>";
+        });
       </script>
     </body>
     </html>
     """
+    components.html(html_code, height=450)
 
 # ---------------------------
-# VERIFY QR & LOG
-# ---------------------------
-def verify_and_log(qr_text, df_emp):
-    qr_text = str(qr_text).strip()
-
-    if "|" in qr_text:
-        name, emp_id = qr_text.split("|")
-        name = name.strip()
-        emp_id = emp_id.strip()
-    else:
-        emp_id = qr_text.strip()
-        name = ""
-
-    emp_row = df_emp[df_emp["emp"] == emp_id]
-    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-    if emp_row.empty:
-        return False, "NOT VERIFIED", emp_id, timestamp, name
-
-    verified_name = emp_row["name"].values[0]
-
-    df_att = load_attendance()
-    if emp_id in df_att["emp_id"].astype(str).tolist():
-        return True, "ALREADY LOGGED", emp_id, timestamp, verified_name
-
-    return True, "VERIFIED", emp_id, timestamp, verified_name
-
-# ---------------------------
-# MAIN APP
+# MAIN
 # ---------------------------
 def main():
-    st.title("📌 Attendance Scanner")
+    st.title("QR Attendance Scanner")
 
     df_emp = load_employees()
     if df_emp is None:
         return
 
-    # --- QR SCANNER ---
-    st.subheader("📷 Scan QR (Back Camera)")
-    components.html(qr_scanner_html(), height=450, width=700)
+    st.subheader("Scan QR")
+    qr_scanner()
 
-    # --- MANUAL VERIFICATION
-    st.subheader("📝 Manual Verification")
-    with st.form("manual_form"):
-        manual_emp = st.text_input("Enter Employee ID")
-        manual_submit = st.form_submit_button("Verify")
+    # Listen for QR message
+    qr_value = st.experimental_get_query_params().get("qr", [""])[0]
 
-    if manual_submit:
-        st.session_state.qr_text = manual_emp
+    # Update session state with QR message
+    if "qr_data" not in st.session_state:
+        st.session_state.qr_data = ""
 
-    # --- GET QR FROM URL PARAM ---
-    qr_param = st.experimental_get_query_params().get("qr", [""])[0]
+    # JS -> Streamlit message receiver
+    st.write("""
+        <script>
+        window.addEventListener("message", (event) => {
+            if (event.data.type === "qr") {
+                const qr = event.data.text;
+                window.parent.postMessage({qr: qr}, "*");
+            }
+        });
+        </script>
+    """, unsafe_allow_html=True)
 
-    if qr_param:
-        st.session_state.qr_text = qr_param
+    # If QR is received via message
+    if st.session_state.qr_data == "":
+        st.session_state.qr_data = qr_value
 
-    # --- PROCESS QR
-    if st.session_state.get("qr_text", "") != "":
-        ok, status, emp_id, timestamp, name = verify_and_log(st.session_state.qr_text, df_emp)
-        df_att = load_attendance()
+    if st.session_state.qr_data:
+        emp_id = st.session_state.qr_data.strip()
+        emp_row = df_emp[df_emp["emp"] == emp_id]
 
-        if status == "VERIFIED":
-            df_att = pd.concat([df_att, pd.DataFrame([{
-                "name": name,
-                "emp_id": emp_id,
-                "status": status,
-                "timestamp": timestamp
-            }])], ignore_index=True)
-            save_attendance(df_att)
-            st.success(f"{status} ✔️ | {name} | {emp_id} | {timestamp}")
-
+        if emp_row.empty:
+            st.error("NOT VERIFIED ❌")
         else:
-            st.error(f"{status} ❌ | {name} | {emp_id} | {timestamp}")
+            name = emp_row["name"].values[0]
+            df_att = load_attendance()
 
-        st.session_state.qr_text = ""
-        st.experimental_set_query_params(qr="")  # clear param
+            if emp_id in df_att["emp_id"].astype(str).tolist():
+                st.warning("Already logged today")
+            else:
+                df_att = df_att.append({
+                    "name": name,
+                    "emp_id": emp_id,
+                    "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                }, ignore_index=True)
+                save_attendance(df_att)
+                st.success(f"Attendance logged for {name}")
 
-    # --- VERIFIED TABLE ONLY ---
-    st.subheader("🧾 Verified Attendance Log")
-    df_att = load_attendance()
-    df_verified = df_att[df_att["status"] == "VERIFIED"]
-    st.dataframe(df_verified)
+        st.session_state.qr_data = ""
+
+    st.subheader("Verified Logs")
+    st.dataframe(load_attendance())
 
 if __name__ == "__main__":
     main()
