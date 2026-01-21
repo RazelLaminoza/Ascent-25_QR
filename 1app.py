@@ -3,6 +3,7 @@ import pandas as pd
 import os
 import base64
 import datetime
+import streamlit.components.v1 as components
 
 # ---------------------------
 # Constants
@@ -11,7 +12,7 @@ EMPLOYEE_EXCEL = "clean_employees.xlsx"
 ATTENDANCE_FILE = "attendance.csv"
 
 # ---------------------------
-# Styles (Same as your main app)
+# Styles
 # ---------------------------
 st.markdown("""
 <style>
@@ -100,13 +101,85 @@ def read_employee_file():
         return None
 
 # ---------------------------
+# QR Scanner Component (BACK CAMERA)
+# ---------------------------
+def qr_scanner():
+    components.html(
+        """
+        <html>
+        <head>
+          <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
+        </head>
+        <body>
+        <div style="width:100%; text-align:center;">
+            <div id="reader" style="width: 400px; margin: 0 auto;"></div>
+            <p id="result"></p>
+        </div>
+        <script>
+            function onScanSuccess(decodedText, decodedResult) {
+                document.getElementById('result').innerText = decodedText;
+                window.parent.postMessage({ type: 'qr', text: decodedText }, '*');
+            }
+
+            function onScanFailure(error) {
+                // ignore
+            }
+
+            let html5QrcodeScanner = new Html5QrcodeScanner(
+                "reader",
+                {
+                    fps: 10,
+                    qrbox: 250,
+                    videoConstraints: {
+                        facingMode: { exact: "environment" }
+                    }
+                }
+            );
+            html5QrcodeScanner.render(onScanSuccess, onScanFailure);
+        </script>
+        </body>
+        </html>
+        """,
+        height=450,
+        width=600,
+    )
+
+# ---------------------------
 # Main Page
 # ---------------------------
 def main():
-    st.markdown("<h1 style='text-align:center; color:#FFD700;'>Attendance Checker</h1>", unsafe_allow_html=True)
-    st.markdown("<p style='text-align:center; color:white;'>Enter Employee ID to verify and log attendance</p>", unsafe_allow_html=True)
+    st.markdown("<h1 style='text-align:center; color:#FFD700;'>QR Attendance Scanner</h1>", unsafe_allow_html=True)
+    st.markdown("<p style='text-align:center; color:white;'>Scan QR to mark attendance</p>", unsafe_allow_html=True)
 
-    emp_id = st.text_input("Employee ID", key="emp_id_input")
+    qr_scanner()
+
+    # JS to capture postMessage and set it into Streamlit
+    st.markdown("""
+        <script>
+        const setQr = (qr) => {
+            window.parent.postMessage({type: "SET_QR", text: qr}, "*");
+        };
+
+        window.addEventListener("message", (event) => {
+            if (event.data.type === "qr") {
+                const qr = event.data.text;
+                const input = window.parent.document.querySelector('input[data-testid="stTextInput"]');
+                if (input) {
+                    input.value = qr;
+                    input.dispatchEvent(new Event('input', { bubbles: true }));
+                }
+            }
+        });
+        </script>
+    """, unsafe_allow_html=True)
+
+    scanned = st.text_input("Scanned QR (Auto):", key="scanned_qr")
+
+    # Manual input (optional)
+    manual_id = st.text_input("Manual Employee ID:", key="manual_id")
+
+    # Choose which one to use
+    emp_id = scanned if scanned else manual_id
 
     if st.button("Verify & Log"):
         if not emp_id.strip():
@@ -125,7 +198,6 @@ def main():
             today = (datetime.datetime.utcnow() + datetime.timedelta(hours=8)).strftime("%Y-%m-%d")
             now_pht = (datetime.datetime.utcnow() + datetime.timedelta(hours=8)).strftime("%H:%M:%S")
 
-            # prevent duplicate attendance for same day
             if ((df_att["emp_id"].astype(str) == emp_id) & (df_att["date"] == today)).any():
                 st.warning("Attendance already recorded today.")
             else:
