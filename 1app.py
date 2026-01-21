@@ -113,12 +113,11 @@ def qr_scanner():
         <body>
         <div style="width:100%; text-align:center;">
             <div id="reader" style="width: 400px; margin: 0 auto;"></div>
-            <p id="result"></p>
         </div>
         <script>
             function onScanSuccess(decodedText, decodedResult) {
-                document.getElementById('result').innerText = decodedText;
-                window.parent.postMessage({ type: 'qr', text: decodedText }, '*');
+                // Send QR to Streamlit via query params
+                window.location.href = window.location.origin + window.location.pathname + "?qr=" + encodeURIComponent(decodedText);
             }
 
             function onScanFailure(error) {
@@ -153,38 +152,11 @@ def main():
 
     qr_scanner()
 
-    # JS to capture postMessage and set it into Streamlit
-    st.markdown("""
-        <script>
-        const setQr = (qr) => {
-            window.parent.postMessage({type: "SET_QR", text: qr}, "*");
-        };
+    # Get QR from query params
+    qr_value = st.experimental_get_query_params().get("qr", [""])[0]
 
-        window.addEventListener("message", (event) => {
-            if (event.data.type === "qr") {
-                const qr = event.data.text;
-                const input = window.parent.document.querySelector('input[data-testid="stTextInput"]');
-                if (input) {
-                    input.value = qr;
-                    input.dispatchEvent(new Event('input', { bubbles: true }));
-                }
-            }
-        });
-        </script>
-    """, unsafe_allow_html=True)
-
-    scanned = st.text_input("Scanned QR (Auto):", key="scanned_qr")
-
-    # Manual input (optional)
-    manual_id = st.text_input("Manual Employee ID:", key="manual_id")
-
-    # Choose which one to use
-    emp_id = scanned if scanned else manual_id
-
-    if st.button("Verify & Log"):
-        if not emp_id.strip():
-            st.error("Please enter an Employee ID")
-            return
+    if qr_value:
+        emp_id = qr_value.strip()
 
         df_employees = read_employee_file()
         if df_employees is None:
@@ -198,6 +170,7 @@ def main():
             today = (datetime.datetime.utcnow() + datetime.timedelta(hours=8)).strftime("%Y-%m-%d")
             now_pht = (datetime.datetime.utcnow() + datetime.timedelta(hours=8)).strftime("%H:%M:%S")
 
+            # Prevent duplicate for today
             if ((df_att["emp_id"].astype(str) == emp_id) & (df_att["date"] == today)).any():
                 st.warning("Attendance already recorded today.")
             else:
