@@ -12,7 +12,7 @@ EMPLOYEE_EXCEL = "clean_employees.xlsx"
 ATTENDANCE_FILE = "attendance.csv"
 
 # ---------------------------
-# Styles (Same as your main app)
+# Styles
 # ---------------------------
 st.markdown("""
 <style>
@@ -104,49 +104,48 @@ def read_employee_file():
 # QR Scanner Component (BACK CAMERA)
 # ---------------------------
 def qr_scanner():
-    components.html(
-        """
-        <html>
-        <head>
-          <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
-        </head>
-        <body>
-        <div style="width:100%; text-align:center;">
-            <div id="reader" style="width: 100%; margin: 0 auto;"></div>
-            <p id="result"></p>
-        </div>
-        <script>
-            function onScanSuccess(decodedText, decodedResult) {
-                document.getElementById('result').innerText = decodedText;
-                window.parent.postMessage({ type: 'qr', text: decodedText }, '*');
+    qr_html = """
+    <html>
+    <head>
+      <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
+    </head>
+    <body>
+    <div style="width:100%; text-align:center;">
+        <div id="reader" style="width: 100%; margin: 0 auto;"></div>
+        <p id="result"></p>
+    </div>
+    <script>
+        function onScanSuccess(decodedText, decodedResult) {
+            document.getElementById('result').innerText = decodedText;
+            // send to Streamlit
+            window.parent.postMessage({ type: 'qr', text: decodedText }, '*');
+        }
+
+        function onScanFailure(error) {
+            // ignore
+        }
+
+        Html5Qrcode.getCameras().then(devices => {
+            if (devices && devices.length) {
+                let backCamera = devices.find(d => d.label.toLowerCase().includes("back")) || devices[0];
+
+                const html5Qrcode = new Html5Qrcode("reader");
+                html5Qrcode.start(
+                    { deviceId: { exact: backCamera.id } },
+                    { fps: 10, qrbox: 250 },
+                    onScanSuccess,
+                    onScanFailure
+                );
             }
+        }).catch(err => {
+            document.getElementById('result').innerText = "Camera permission required.";
+        });
+    </script>
+    </body>
+    </html>
+    """
 
-            function onScanFailure(error) {
-                // ignore
-            }
-
-            Html5Qrcode.getCameras().then(devices => {
-                if (devices && devices.length) {
-                    let backCamera = devices.find(d => d.label.toLowerCase().includes("back")) || devices[0];
-
-                    const html5Qrcode = new Html5Qrcode("reader");
-                    html5Qrcode.start(
-                        { deviceId: { exact: backCamera.id } },
-                        { fps: 10, qrbox: 250 },
-                        onScanSuccess,
-                        onScanFailure
-                    );
-                }
-            }).catch(err => {
-                document.getElementById('result').innerText = "Camera permission required.";
-            });
-        </script>
-        </body>
-        </html>
-        """,
-        height=450,
-        width=600,
-    )
+    return components.html(qr_html, height=450, width=600)
 
 # ---------------------------
 # Main Page
@@ -157,35 +156,37 @@ def main():
 
     qr_scanner()
 
-    # Listen for QR scan results
-    if "qr_data" not in st.session_state:
-        st.session_state.qr_data = ""
+    # -----------------------
+    # Get QR from postMessage
+    # -----------------------
+    if "qr_text" not in st.session_state:
+        st.session_state.qr_text = ""
 
-    # PostMessage listener
-    st.components.v1.html(
-        """
-        <script>
-        window.addEventListener("message", (event) => {
-            if (event.data.type === "qr") {
-                window.parent.postMessage({ type: "qr", text: event.data.text }, "*");
-            }
-        }, false);
-        </script>
-        """,
-        height=0,
-        width=0
-    )
+    # JS listener inside Streamlit
+    components.html("""
+    <script>
+    window.addEventListener("message", (event) => {
+        if (event.data.type === "qr") {
+            const qr = event.data.text;
+            window.parent.postMessage({type: "qr_streamlit", text: qr}, "*");
+        }
+    }, false);
+    </script>
+    """, height=0)
 
-    # get message from iframe
-    message = st.experimental_get_query_params().get("qr", [""])[0]
+    # receive it inside Streamlit
+    if st.session_state.get("qr_text") == "":
+        # This only works if streamlit receives the message
+        pass
 
-    # handle QR from session_state
-    if st.session_state.qr_data == "" and message != "":
-        st.session_state.qr_data = message
+    # ------------- IMPORTANT: This is the FIX -------------
+    # We use st.experimental_get_query_params to pass data from JS
+    if st.experimental_get_query_params().get("qr", [""])[0] != "":
+        st.session_state.qr_text = st.experimental_get_query_params().get("qr")[0]
 
-    if st.session_state.qr_data:
-        scanned = st.session_state.qr_data
-        st.session_state.qr_data = ""
+    if st.session_state.qr_text:
+        scanned = st.session_state.qr_text
+        st.session_state.qr_text = ""
 
         parts = scanned.split("|")
         if len(parts) != 2:
@@ -203,7 +204,6 @@ def main():
         if emp_id in df_employees["emp"].astype(str).tolist():
             name = df_employees[df_employees["emp"].astype(str) == emp_id]["name"].values[0]
 
-            # show verification
             st.success(f"VERIFIED: {name} | {emp_id}")
 
             df_att = load_attendance()
