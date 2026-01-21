@@ -117,8 +117,7 @@ def qr_scanner():
         </div>
         <script>
             function onScanSuccess(decodedText, decodedResult) {
-                document.getElementById('result').innerText = decodedText;
-                window.parent.postMessage({ type: 'qr', text: decodedText }, '*');
+                window.location.href = window.location.pathname + "?qr=" + encodeURIComponent(decodedText);
             }
 
             function onScanFailure(error) {
@@ -153,52 +152,58 @@ def main():
 
     qr_scanner()
 
-    scanned = st.text_input("Scanned QR (Auto):", key="scanned_qr")
+    qr_param = st.experimental_get_query_params().get("qr", [""])[0]
+    scanned = st.text_input("Scanned QR (Auto):", value=qr_param, key="scanned_qr")
+
+    st.markdown("---")
+    st.markdown("<h3 style='color:white;'>Manual Entry</h3>", unsafe_allow_html=True)
+    manual_qr = st.text_input("Type QR text (Name | EmpID)", key="manual_qr")
+
+    if st.button("Verify & Log (Manual)"):
+        process_qr(manual_qr)
 
     if scanned:
-        # Expected QR format: Name | EmpID
-        parts = scanned.split("|")
-        if len(parts) != 2:
-            st.error("Invalid QR format. Use: Name | EmpID")
-            return
-
-        name_qr = parts[0].strip()
-        emp_id = parts[1].strip()
-
-        df_employees = read_employee_file()
-        if df_employees is None:
-            return
-
-        # verify
-        if emp_id in df_employees["emp"].astype(str).tolist():
-            name = df_employees[df_employees["emp"].astype(str) == emp_id]["name"].values[0]
-
-            # show verification
-            st.success(f"VERIFIED: {name} | {emp_id}")
-
-            df_att = load_attendance()
-
-            today = datetime.date.today().strftime("%Y-%m-%d")
-
-            # prevent duplicate attendance for same day
-            if ((df_att["emp_id"].astype(str) == emp_id) & (df_att["date"] == today)).any():
-                st.warning("Attendance already recorded today.")
-            else:
-                df_att = df_att.append({
-                    "name": name,
-                    "emp_id": emp_id,
-                    "date": today,
-                    "time": datetime.datetime.now().strftime("%H:%M:%S")
-                }, ignore_index=True)
-                save_attendance(df_att)
-                st.success(f"Attendance recorded for {name} ({emp_id})")
-
-        else:
-            st.error("Employee NOT VERIFIED ❌")
+        process_qr(scanned)
 
     st.markdown("---")
     st.markdown("<h2 style='color:#FFD700;'>Attendance Table</h2>", unsafe_allow_html=True)
     st.dataframe(load_attendance())
+
+def process_qr(scanned):
+    parts = scanned.split("|")
+    if len(parts) != 2:
+        st.error("Invalid QR format. Use: Name | EmpID")
+        return
+
+    name_qr = parts[0].strip()
+    emp_id = parts[1].strip()
+
+    df_employees = read_employee_file()
+    if df_employees is None:
+        return
+
+    if emp_id in df_employees["emp"].astype(str).tolist():
+        name = df_employees[df_employees["emp"].astype(str) == emp_id]["name"].values[0]
+        st.success(f"VERIFIED: {name} | {emp_id}")
+
+        df_att = load_attendance()
+        today = (datetime.datetime.utcnow() + datetime.timedelta(hours=8)).strftime("%Y-%m-%d")
+        now_pht = (datetime.datetime.utcnow() + datetime.timedelta(hours=8)).strftime("%H:%M:%S")
+
+        if ((df_att["emp_id"].astype(str) == emp_id) & (df_att["date"] == today)).any():
+            st.warning("Attendance already recorded today.")
+        else:
+            new_row = pd.DataFrame([{
+                "name": name,
+                "emp_id": emp_id,
+                "date": today,
+                "time": now_pht
+            }])
+            df_att = pd.concat([df_att, new_row], ignore_index=True)
+            save_attendance(df_att)
+            st.success(f"Attendance recorded for {name} ({emp_id})")
+    else:
+        st.error("Employee NOT VERIFIED ❌")
 
 if __name__ == "__main__":
     main()
